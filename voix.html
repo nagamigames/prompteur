@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111214">
+<link rel="icon" href="assets/icone.png">
+<title>Prompteur · Essai voix</title>
+<style>
+  :root { color-scheme: dark; --bg: #111214; --panel: #1b1c1f; --line: #2e3035; --fg: #ececec; --muted: #9a9ca1; --accent: #ffc94d; --ok: #30a46c; --bad: #e5484d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+         padding: max(14px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: var(--muted); font-size: 14px; margin: 0; }
+  .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 20px; background: var(--accent); color: #000; }
+  button.stop { background: var(--bad); color: #fff; }
+  button.light { background: var(--panel); color: var(--fg); border: 1px solid var(--line); }
+  .state { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .state.on .dot { background: var(--ok); animation: pulse 1.2s infinite; }
+  .state.err .dot { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .script { background: #000; border-radius: 14px; padding: 16px 18px; font-size: 24px; line-height: 1.45; font-weight: 500; }
+  .script span { transition: color .2s; }
+  .script .read { color: #5c5e63; }
+  .script .here { background: var(--accent); color: #000; border-radius: 4px; }
+  .heard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-height: 70px; font-size: 16px; }
+  .heard i { color: var(--muted); font-style: normal; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .stats div { background: var(--panel); border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  .stats b { display: block; color: var(--fg); font-size: 18px; font-variant-numeric: tabular-nums; }
+  .log { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); background: var(--panel); border-radius: 10px; padding: 10px 12px; max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  details summary { color: var(--muted); cursor: pointer; }
+  textarea { width: 100%; min-height: 140px; margin-top: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 10px; font: 16px/1.4 inherit; }
+  .warn { background: #3a1d1e; border: 1px solid var(--bad); border-radius: 12px; padding: 12px 14px; }
+  .warn[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Essai : le texte suit la voix</h1>
+  <p class="muted">Touchez « Écouter », autorisez le micro, puis lisez à voix haute, à votre rythme. Le surligné jaune doit suivre. « Pause » arrête le suivi sans couper le micro ; « Recommencer » remet le surligné au début.</p>
+  <p id="unsupported" class="warn" hidden></p>
+  <div class="bar">
+    <button id="go" type="button">Écouter</button>
+    <button id="reset" type="button" class="light">Recommencer</button>
+    <button id="mic" type="button" class="light" hidden>Couper le micro</button>
+    <span id="state" class="state"><span class="dot"></span><span id="state-label">Arrêté</span></span>
+  </div>
+  <div id="script" class="script"></div>
+  <div class="stats">
+    <div>Mots suivis<b id="s-prog">0 / 0</b></div>
+    <div>Relances automatiques<b id="s-restarts">0</b></div>
+    <div>Depuis le début<b id="s-uptime">0 s</b></div>
+    <div>Dernier mot entendu<b id="s-last">—</b></div>
+  </div>
+  <div><p class="muted">Ce que l'iPhone entend :</p><div id="heard" class="heard"></div></div>
+  <details><summary>Lire mon propre texte</summary><textarea id="own" placeholder="Collez un texte ici, puis touchez Recommencer."></textarea></details>
+  <div><p class="muted">Journal (à me montrer en capture d'écran) :</p><div id="log" class="log"></div></div>
+</main>
+<script>
+const SAMPLE = "Bonjour à tous et bienvenue dans cette nouvelle vidéo. Aujourd'hui, je vais vous montrer comment j'ai fabriqué mon propre prompteur, avec un iPhone qui affiche le texte et un iPad qui sert de télécommande. L'idée est simple : je lis mon texte en regardant la caméra, et le défilement suit ma voix. Si je m'arrête pour respirer, le texte s'arrête aussi. Si je reprends, il repart tout seul. Pas besoin de régler la vitesse à l'avance, ni de demander à quelqu'un de suivre derrière moi. Voyons maintenant si la reconnaissance vocale tient le rythme en français, sur une lecture de plusieurs minutes.";
+
+const $ = (id) => document.getElementById(id);
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const t0 = performance.now();
+const stamp = () => ((performance.now() - t0) / 1000).toFixed(1).padStart(6) + ' s';
+function log(msg) { const el = $('log'); el.textContent = `${stamp()}  ${msg}\n` + el.textContent; }
+
+// ---- Texte et mots ----
+const norm = (w) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+let words = [];   // { el, n }
+let pos = 0;      // prochain mot à lire
+
+function loadScript() {
+  const text = $('own').value.trim() || SAMPLE;
+  const box = $('script');
+  box.textContent = '';
+  words = [];
+  for (const part of text.split(/(\s+)/)) {
+    if (!part) continue;
+    if (/^\s+$/.test(part)) { box.append(part); continue; }
+    const el = document.createElement('span');
+    el.textContent = part;
+    box.append(el);
+    // « l'idée » → deux mots pour la reconnaissance (« l », « idée »).
+    const pieces = part.split(/['’-]/).map(norm).filter(Boolean);
+    for (const n of pieces) words.push({ el, n });
+  }
+  pos = 0;
+  paint();
+}
+
+function paint() {
+  for (let i = 0; i < words.length; i++) {
+    words[i].el.classList.toggle('read', i < pos);
+    words[i].el.classList.remove('here');
+  }
+  if (pos < words.length) {
+    words[pos].el.classList.add('here');
+    words[pos].el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  $('s-prog').textContent = `${Math.min(pos, words.length)} / ${words.length}`;
+}
+
+// ---- Alignement : où en est la lecture ? ----
+function close(a, b) {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  // Distance d'édition ≤ 1 (accords, pluriels, petites erreurs de reconnaissance).
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return diff + (a.length - i) + (b.length - j) <= 1;
+}
+
+// Suivi pas à pas : chaque mot entendu ne peut faire avancer que de quelques mots.
+// Une phrase lue plus loin (ou répétée ailleurs dans le texte) ne fait donc jamais sauter le prompteur :
+// les sauts se font à la main, depuis la régie.
+const STEP = 3;     // mots du texte que la reconnaissance peut avoir manqués entre deux mots entendus
+const RESYNC = 5;   // rattrapage : 3 mots entendus d'affilée retrouvés au plus 5 mots plus loin (jamais une phrase entière)
+let anchor = { pos: 0, heard: 0 }; // point de départ du suivi : position dans le texte et nombre de mots déjà entendus
+
+function follow(cur, heard) {
+  for (let h = 0; h < heard.length; h++) {
+    const w = heard[h];
+    const reach = w.length < 3 ? 1 : STEP; // « de », « la », « et » : seulement le mot attendu ou le suivant
+    let hit = -1;
+    for (let k = cur; k <= Math.min(words.length - 1, cur + reach); k++) {
+      if (close(w, words[k].n)) { hit = k; break; }
+    }
+    if (hit < 0 && h + 2 < heard.length) {
+      // Plusieurs mots manqués : on cherche les 3 prochains mots entendus, d'affilée, un peu plus loin.
+      for (let k = cur; k <= Math.min(words.length - 3, cur + RESYNC); k++) {
+        if (close(w, words[k].n) && close(heard[h + 1], words[k + 1].n) && close(heard[h + 2], words[k + 2].n)) { hit = k; break; }
+      }
+    }
+    if (hit >= 0) cur = hit + 1;
+  }
+  return cur;
+}
+
+function align(heardWords) {
+  // La reconnaissance réécrit parfois ses derniers mots : on refait le suivi depuis le point de départ à chaque fois.
+  const next = follow(anchor.pos, heardWords.slice(Math.min(anchor.heard, heardWords.length)));
+  if (next > pos) { pos = next; paint(); }
+}
+
+// Le suivi repart d'ici (début, reprise après pause, saut fait à la main).
+let heardNow = 0; // nombre de mots entendus depuis le début de l'écoute en cours
+function setAnchor() { anchor = { pos, heard: heardNow }; }
+
+// ---- Écoute ----
+// Sur iPhone, arrêter puis relancer la reconnaissance la rend souvent sourde.
+// Donc : un seul objet d'écoute, gardé ouvert ; « Pause » arrête seulement le suivi,
+// et si le système coupe l'écoute, on relance le même objet dès qu'il a fini de s'arrêter.
+let rec = null, wanted = false, running = false, following = false;
+let restarts = 0, sessions = 0, sessionResults = 0, sessionStart = 0, firstStart = 0, lastHeardAt = 0, uptimeTimer = null;
+
+function build() {
+  const r = new Rec();
+  r.lang = 'fr-FR';
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+  r.onstart = () => {
+    running = true; sessions++; sessionResults = 0; sessionStart = performance.now();
+    heardNow = 0; setAnchor(); // nouvelle écoute : sa liste de mots repart de zéro
+    setState('on', following ? 'À l\'écoute' : 'Micro ouvert · suivi en pause');
+    log(`écoute n°${sessions} démarrée`);
+  };
+  r.onspeechstart = () => log('voix détectée');
+  r.onresult = (ev) => {
+    sessionResults++;
+    let interim = '', fin = '';
+    for (let i = 0; i < ev.results.length; i++) {
+      const x = ev.results[i];
+      if (x.isFinal) fin += x[0].transcript + ' ';
+      else interim += x[0].transcript + ' ';
+    }
+    lastHeardAt = performance.now();
+    $('heard').innerHTML = '';
+    $('heard').append(fin, Object.assign(document.createElement('i'), { textContent: interim }));
+    const heardWords = (fin + interim).split(/[\s'’-]+/).map(norm).filter(Boolean);
+    heardNow = heardWords.length;
+    if (following) align(heardWords);
+  };
+  r.onerror = (ev) => {
+    log(`erreur : ${ev.error}${ev.message ? ' · ' + ev.message : ''}`);
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      wanted = false; following = false;
+      setState('err', 'Micro refusé');
+      updateUI();
+    }
+  };
+  r.onend = () => {
+    running = false;
+    const dur = Math.round((performance.now() - sessionStart) / 1000);
+    log(`écoute n°${sessions} terminée après ${dur} s · ${sessionResults} résultat(s)`);
+    if (!wanted) { setState('', 'Micro coupé'); return; }
+    restarts++;
+    $('s-restarts').textContent = restarts;
+    setTimeout(relaunch, 250);
+  };
+  return r;
+}
+
+function relaunch() {
+  if (!wanted || running) return;
+  try {
+    rec.start();
+  } catch (e) {
+    // Objet inutilisable : on en crée un neuf.
+    log('relance du même objet impossible (' + e.name + ') · objet neuf');
+    rec = build();
+    try { rec.start(); } catch (e2) { log('démarrage impossible : ' + e2.message); }
+  }
+}
+
+function micOn() {
+  wanted = true;
+  if (!rec) rec = build();
+  if (!firstStart) {
+    firstStart = performance.now();
+    uptimeTimer = setInterval(() => {
+      $('s-uptime').textContent = Math.round((performance.now() - firstStart) / 1000) + ' s';
+      $('s-last').textContent = lastHeardAt ? `il y a ${Math.round((performance.now() - lastHeardAt) / 1000)} s` : '—';
+    }, 500);
+  }
+  relaunch();
+}
+
+function micOff() {
+  wanted = false; following = false;
+  try { rec?.abort(); } catch {}
+  updateUI();
+}
+
+function updateUI() {
+  $('go').textContent = !wanted ? 'Écouter' : following ? 'Pause' : 'Reprendre';
+  $('go').classList.toggle('stop', wanted && following);
+  $('mic').hidden = !wanted;
+  if (running) setState('on', following ? 'À l\'écoute' : 'Micro ouvert · suivi en pause');
+}
+
+$('go').addEventListener('click', () => {
+  if (!wanted) { following = true; micOn(); }
+  else following = !following;
+  if (following) setAnchor(); // les mots dits pendant la pause ne comptent pas
+  log(following ? 'suivi : en marche' : 'suivi : en pause (micro toujours ouvert)');
+  updateUI();
+});
+$('mic').addEventListener('click', () => { log('micro coupé à la main'); micOff(); });
+
+function setState(cls, label) { $('state').className = 'state ' + cls; $('state-label').textContent = label; }
+
+$('reset').addEventListener('click', () => { loadScript(); setAnchor(); $('heard').textContent = ''; log('recommencé'); });
+
+loadScript();
+const ua = navigator.userAgent;
+log(`navigateur : ${/CriOS/.test(ua) ? 'Chrome iOS' : /Safari/.test(ua) && /iPhone|iPad/.test(ua) ? 'Safari iOS' : ua.slice(0, 60)}`);
+if (!Rec) {
+  $('unsupported').hidden = false;
+  $('unsupported').textContent = 'Ce navigateur ne propose pas la reconnaissance vocale. Ouvrez cette page dans Safari.';
+  $('go').disabled = true;
+  log('reconnaissance vocale : absente');
+} else if (!window.isSecureContext) {
+  $('unsupported').hidden = false;
+  $('unsupported').textContent = 'Le micro n\'est autorisé que sur une adresse sécurisée (https). Ouvrez la version en ligne de cette page.';
+  log('page non sécurisée : micro bloqué');
+} else {
+  log('reconnaissance vocale : disponible');
+}
+</script>
+</body>
+</html>

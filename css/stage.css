@@ -1,0 +1,64 @@
+/* Zone de texte du prompteur. Partagée par l'écran (iPhone) et l'aperçu de la régie (iPad) :
+   les deux doivent produire exactement la même mise en page. */
+
+.stage {
+  --bg: #000;
+  --fg: #fff;
+  --accent: #ffc94d;
+  --band: rgba(255, 255, 255, 0.07);
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.stage[data-theme='yellow'] { --fg: #ffe14d; --accent: #fff; }
+.stage[data-theme='light'] { --bg: #fff; --fg: #000; --accent: #b36b00; --band: rgba(0, 0, 0, 0.06); }
+
+.stage .content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 0 var(--margin);
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: var(--fs);
+  line-height: var(--lh);
+  font-weight: 500;
+  text-align: var(--align);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  will-change: transform;
+}
+.stage .block { margin: 0 0 calc(var(--fs) * 0.8); }
+.stage .chapter {
+  color: var(--accent);
+  font-size: 0.55em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.stage .end { opacity: 0.4; text-align: center; font-size: 0.6em; padding-bottom: 100vh; }
+
+/* Bande de lecture : la ligne qui s'y trouve est celle à lire. */
+.stage .line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--rl);
+  height: calc(var(--fs) * var(--lh));
+  background: var(--band);
+  pointer-events: none;
+}
+.stage .line::before,
+.stage .line::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  margin-top: calc(var(--fs) * -0.22);
+  border: calc(var(--fs) * 0.22) solid transparent;
+}
+.stage .line::before { left: 0; border-left-color: var(--accent); }
+.stage .line::after { right: 0; border-right-color: var(--accent); }
+.stage.no-line .line { display: none; }

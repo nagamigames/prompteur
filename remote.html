@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Régie">
+<meta name="theme-color" content="#111214">
+<link rel="manifest" href="remote.webmanifest">
+<link rel="apple-touch-icon" href="assets/icone.png">
+<link rel="icon" href="assets/icone.png">
+<title>Prompteur · Régie</title>
+<link rel="stylesheet" href="css/stage.css">
+<link rel="stylesheet" href="css/remote.css">
+</head>
+<body>
+<header>
+  <div class="brand">Prompteur <span>· Régie</span></div>
+  <button id="conn" class="pill" type="button" data-state="connecting" aria-label="Connexion de l'iPhone">
+    <span class="dot"></span><span id="conn-label">Connexion…</span>
+  </button>
+</header>
+
+<main>
+  <section class="left">
+    <div id="preview-box" class="preview-box" title="Glissez pour avancer ou reculer dans le texte">
+      <div id="preview-frame" class="preview-frame">
+        <div id="preview" class="stage">
+          <div class="content" id="preview-content"></div>
+          <div class="line"></div>
+        </div>
+      </div>
+      <div id="preview-badge" class="preview-badge">Aperçu de l'iPhone</div>
+    </div>
+
+    <div class="transport">
+      <button type="button" data-cmd="top" class="t-small" aria-label="Revenir au début">⇤<small>Début</small></button>
+      <button type="button" data-cmd="para-prev" aria-label="Paragraphe précédent">«<small>Paragraphe</small></button>
+      <button type="button" data-cmd="line-prev" aria-label="Ligne précédente">‹<small>Ligne</small></button>
+      <button type="button" data-cmd="toggle" id="play" class="t-play" aria-label="Lecture">
+        <svg class="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z"/></svg>
+      </button>
+      <button type="button" data-cmd="line-next" aria-label="Ligne suivante">›<small>Ligne</small></button>
+      <button type="button" data-cmd="para-next" aria-label="Paragraphe suivant">»<small>Paragraphe</small></button>
+    </div>
+
+    <div class="speed" id="speed-row">
+      <button type="button" id="speed-down" aria-label="Ralentir">−</button>
+      <div class="speed-mid">
+        <div class="speed-value"><b id="speed-value">20</b> lignes / min</div>
+        <input id="speed-range" type="range" min="2" max="120" step="1" aria-label="Vitesse">
+      </div>
+      <button type="button" id="speed-up" aria-label="Accélérer">+</button>
+      <button type="button" id="voice-on" class="voice-btn" aria-label="Le texte suit ma voix">🎙<small>Voix</small></button>
+    </div>
+
+    <div class="voice-bar" id="voice-bar" hidden>
+      <span class="vdot" id="voice-dot"></span>
+      <div class="voice-mid">
+        <b id="voice-state">Voix</b>
+        <span id="voice-heard" class="voice-heard"></span>
+      </div>
+      <button type="button" id="voice-off" class="voice-btn on" aria-label="Revenir à la vitesse fixe">🎙<small>Voix</small></button>
+    </div>
+  </section>
+
+  <section class="right">
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="text" aria-selected="true">Texte</button>
+      <button type="button" role="tab" data-tab="plan">Plan</button>
+      <button type="button" role="tab" data-tab="look">Affichage</button>
+      <button type="button" role="tab" data-tab="library">Scripts</button>
+    </nav>
+
+    <div class="panel" data-panel="text">
+      <div class="editor-bar">
+        <span class="hint">Ligne vide : nouveau paragraphe · <b>#</b> en début de ligne : repère</span>
+        <span id="sync" class="sync"></span>
+        <button type="button" id="read-here" class="btn-light">Lire depuis le curseur</button>
+      </div>
+      <textarea id="editor" spellcheck="true" autocapitalize="sentences" placeholder="Collez ou écrivez votre texte ici…"></textarea>
+    </div>
+
+    <div class="panel" data-panel="plan" hidden>
+      <ol id="plan" class="plan"></ol>
+    </div>
+
+    <div class="panel" data-panel="look" hidden>
+      <div class="form">
+        <div class="row toggles">
+          <label class="check"><input type="checkbox" data-set="voice"> Le texte suit ma voix <small>(micro de l'iPhone)</small></label>
+        </div>
+        <label class="row"><span>Rattrapage du suivi vocal <b id="v-catchUp"></b></span>
+          <input type="range" data-set="catchUp" min="0" max="15" step="1"></label>
+        <p class="hint small">Si l'iPhone a mal entendu quelques mots, le suivi les retrouve jusqu'à ce nombre de mots plus loin. Plus haut : il vous suit aussi quand vous sautez une phrase, mais peut sauter à tort sur une phrase répétée.</p>
+        <label class="row"><span>Taille du texte <b id="v-fontSize"></b></span>
+          <input type="range" data-set="fontSize" min="20" max="160" step="2"></label>
+        <label class="row"><span>Interligne <b id="v-lineHeight"></b></span>
+          <input type="range" data-set="lineHeight" min="1" max="2.2" step="0.05"></label>
+        <label class="row"><span>Marges sur les côtés <b id="v-margin"></b></span>
+          <input type="range" data-set="margin" min="0" max="30" step="1"></label>
+        <label class="row"><span>Hauteur de la ligne de lecture <b id="v-readingLine"></b></span>
+          <input type="range" data-set="readingLine" min="5" max="70" step="1"></label>
+        <div class="row toggles">
+          <label class="check"><input type="checkbox" data-set="mirrorX"> Miroir horizontal <small>(vitre de prompteur)</small></label>
+          <label class="check"><input type="checkbox" data-set="mirrorY"> Miroir vertical</label>
+          <label class="check"><input type="checkbox" data-set="showLine"> Afficher la ligne de lecture</label>
+        </div>
+        <div class="row"><span>Alignement</span>
+          <div class="seg" data-seg="align">
+            <button type="button" data-v="left">Gauche</button><button type="button" data-v="center">Centré</button>
+          </div>
+        </div>
+        <div class="row"><span>Couleurs</span>
+          <div class="seg" data-seg="theme">
+            <button type="button" data-v="dark">Blanc sur noir</button><button type="button" data-v="yellow">Jaune sur noir</button><button type="button" data-v="light">Noir sur blanc</button>
+          </div>
+        </div>
+        <button type="button" id="reset-look" class="btn-light">Revenir aux réglages d'origine</button>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="library" hidden>
+      <div class="lib-bar">
+        <button type="button" id="new-script" class="btn">Nouveau texte</button>
+        <label class="btn-light file-btn">Importer un fichier .txt<input id="import" type="file" accept=".txt,.md,text/plain"></label>
+      </div>
+      <ul id="library" class="library"></ul>
+    </div>
+  </section>
+</main>
+
+<dialog id="pair">
+  <form method="dialog">
+    <h2>Connecter l'iPhone</h2>
+    <p id="pair-intro">Avec l'appareil photo de l'iPhone, scannez ce QR code, puis touchez le lien qui apparaît.</p>
+    <div id="qr" class="qr"></div>
+    <p class="url" id="pair-url"></p>
+    <div id="pair-code-row" class="pair-code" hidden>
+      <span>Code de l'écran :</span>
+      <input id="pair-code" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="off">
+      <button type="button" id="pair-apply" class="btn-light">Utiliser ce code</button>
+    </div>
+    <p class="small">Sur l'iPhone : touchez « Activer l'écran ». Pour un écran sans barres de Safari, utilisez Partager › Sur l'écran d'accueil.</p>
+    <button class="btn" value="close">Fermer</button>
+  </form>
+</dialog>
+
+<script src="vendor/qrcode.js"></script>
+<script type="module" src="js/remote.js"></script>
+</body>
+</html>
